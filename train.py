@@ -9,8 +9,8 @@ import itertools
 from model import Generator, Discriminator  # assuming you have these modules defined in model.py
 
 # Hyperparameters
-lr_D = 0.0001
-lr_G = 0.0003
+lr_D = 0.00001
+lr_G = 0.00003
 batch_size = 32
 image_size = 256
 num_epochs = 10
@@ -25,11 +25,11 @@ transform = transforms.Compose([
 ])
 
 # Data loader for domain A and B
-data_loader_A = DataLoader(datasets.ImageFolder('thermal2rgb/trainA', transform),
+data_loader_A = DataLoader(datasets.ImageFolder('train_a', transform),
                          batch_size=batch_size,
                          shuffle=True)
 
-data_loader_B = DataLoader(datasets.ImageFolder('thermal2rgb/trainB', transform),
+data_loader_B = DataLoader(datasets.ImageFolder('train_b', transform),
                          batch_size=batch_size,
                          shuffle=True)
 
@@ -46,14 +46,23 @@ opt_D = torch.optim.Adam(list(D_A.parameters()) + list(D_B.parameters()), lr=lr_
 criterion_GAN = torch.nn.MSELoss().to(device)  # for adversarial loss
 criterion_cycle = torch.nn.L1Loss().to(device)  # for cycle consistency loss
 
+
+# Lists to keep track of loss values for plotting
+loss_G_values = []
+loss_D_values = []
+loss_D_A_values = []
+loss_D_B_values = []
+
 # Training
 for epoch in range(num_epochs):
     for i, ((real_images_A, _), (real_images_B, _)) in enumerate(zip(data_loader_A, data_loader_B)):
         if real_images_A is None or real_images_B is None:
             continue  # Skip the rest of this iteration
 
+
         real_images_A = real_images_A.to(device)
         real_images_B = real_images_B.to(device)
+        print(epoch)
 
         # Forward pass
         fake_images_B = G_A2B(real_images_A)
@@ -109,7 +118,7 @@ for epoch in range(num_epochs):
         loss_D_B_values.append(loss_D_B.item())
 
     # Save some generated images and the model
-    if (epoch + 1) % 10 == 0:
+    if (epoch + 1) % 2 == 0:
         save_image(fake_images_B, f'images/fake_images_A2B-{epoch + 1}.png', normalize=True)
         save_image(fake_images_A, f'images/fake_images_B2A-{epoch + 1}.png', normalize=True)
         torch.save(G_A2B.state_dict(), f'models/G_A2B-{epoch + 1}.ckpt')
