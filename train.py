@@ -5,7 +5,8 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 import itertools
-
+import os
+import matplotlib.pyplot as plt
 from model import Generator, Discriminator  # assuming you have these modules defined in model.py
 
 # Hyperparameters
@@ -26,12 +27,12 @@ transform = transforms.Compose([
 
 # Data loader for domain A and B
 data_loader_A = DataLoader(datasets.ImageFolder('train_a', transform),
-                         batch_size=batch_size,
-                         shuffle=True)
+                           batch_size=batch_size,
+                           shuffle=True)
 
 data_loader_B = DataLoader(datasets.ImageFolder('train_b', transform),
-                         batch_size=batch_size,
-                         shuffle=True)
+                           batch_size=batch_size,
+                           shuffle=True)
 
 # Initialize CycleGAN generators and discriminators
 G_A2B = Generator().to(device)
@@ -46,19 +47,25 @@ opt_D = torch.optim.Adam(list(D_A.parameters()) + list(D_B.parameters()), lr=lr_
 criterion_GAN = torch.nn.MSELoss().to(device)  # for adversarial loss
 criterion_cycle = torch.nn.L1Loss().to(device)  # for cycle consistency loss
 
-
 # Lists to keep track of loss values for plotting
 loss_G_values = []
 loss_D_values = []
 loss_D_A_values = []
 loss_D_B_values = []
 
+# Create 'images' directory
+if not os.path.exists('images'):
+    os.makedirs('images')
+
+# Create 'models' directory
+if not os.path.exists('models'):
+    os.makedirs('models')
+
 # Training
 for epoch in range(num_epochs):
     for i, ((real_images_A, _), (real_images_B, _)) in enumerate(zip(data_loader_A, data_loader_B)):
         if real_images_A is None or real_images_B is None:
             continue  # Skip the rest of this iteration
-
 
         real_images_A = real_images_A.to(device)
         real_images_B = real_images_B.to(device)
@@ -110,7 +117,7 @@ for epoch in range(num_epochs):
         opt_D.zero_grad()
         loss_D.backward()
         opt_D.step()
-        
+
         # Save loss values for this batch
         loss_G_values.append(loss_G.item())
         loss_D_values.append(loss_D.item())

@@ -2,51 +2,166 @@
 import torch
 import torch.nn as nn
 
-# Define a simple ConvBlock for ease
+import torch
+import torch.nn as nn
+
+
 class ConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding):
-        super(ConvBlock, self).__init__()
+    def __init__(self, in_channels, out_channels, down=True, use_act=True, **kwargs):
+        super().__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(True)
+            nn.Conv2d(in_channels, out_channels, padding_mode="reflect", **kwargs)
+            if down
+            else nn.ConvTranspose2d(in_channels, out_channels, **kwargs),
+            nn.InstanceNorm2d(out_channels),
+            nn.ReLU(inplace=True) if use_act else nn.Identity(),
         )
 
     def forward(self, x):
         return self.conv(x)
 
-# A very simplified Generator model
+
+class ResidualBlock(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.block = nn.Sequential(
+            ConvBlock(channels, channels, kernel_size=3, padding=1),
+            ConvBlock(channels, channels, use_act=False, kernel_size=3, padding=1),
+        )
+
+    def forward(self, x):
+        return x + self.block(x)
+
+
 class Generator(nn.Module):
-    def __init__(self):
-        super(Generator, self).__init__()
-        self.model = nn.Sequential(
-            ConvBlock(3, 64, 7, 1, 3),  # input is (nc) x 256 x 256
-            ConvBlock(64, 128, 3, 2, 1),  # state size: (ndf) x 128 x 128
-            ConvBlock(128, 256, 3, 2, 1),  # state size: (ndf*2) x 64 x 64
-            ConvBlock(256, 512, 3, 2, 1),  # state size: (ndf*4) x 32 x 32
-            ConvBlock(512, 512, 3, 2, 1),  # state size: (ndf*4) x 16 x 16
-            nn.ConvTranspose2d(512, 256, 4, 2, 1),  # state size: (ndf*2) x 32 x 32
-            nn.ConvTranspose2d(256, 128, 4, 2, 1),  # state size: (ndf) x 64 x 64
-            nn.ConvTranspose2d(128, 64, 4, 2, 1),  # state size: (nc) x 128 x 128
-            nn.ConvTranspose2d(64, 3, 4, 2, 1),  # state size: (nc) x 256 x 256
-            nn.Tanh()
+    def __init__(self, img_channels, num_features=64, num_residuals=9):
+        super().__init__()
+        self.initial = nn.Sequential(
+            nn.Conv2d(
+                img_channels,
+                num_features,
+                kernel_size=7,
+                stride=1,
+                padding=3,
+                padding_mode="reflect",
+            ),
+            nn.InstanceNorm2d(num_features),
+            nn.ReLU(inplace=True),
+        )
+        self.down_blocks = nn.ModuleList(
+            [
+                ConvBlock(
+                    num_features, num_features * 2, kernel_size=3, stride=2, padding=1
+                ),
+                ConvBlock(
+                    num_features * 2,
+                    num_features * 4,
+                    kernel_size=3,
+                    stride=2,
+                    padding=1,
+                ),
+            ]
+        )
+        self.res_blocks = nn.Sequential(
+            *[ResidualBlock(num_features * 4) for _ in range(num_residuals)]
+        )
+        self.up_blocks = nn.ModuleList(
+            [
+                ConvBlock(
+                    num_features * 4,
+                    num_features * 2,
+                    down=False,
+                    kernel_size=3,
+                    stride=2,
+                    padding=1,
+                    output_padding=1,
+                ),
+                ConvBlock(
+                    num_features * 2,
+                    num_features * 1,
+                    down=False,
+                    kernel_size=3,
+                    stride=2,
+                    padding=1,
+                    output_padding=1,
+                ),
+            ]
         )
 
-    def forward(self, input):
-        return self.model(input)
+        self.last = nn.Conv2d(
+            num_features * 1,
+            img_channels,
+            kernel_size=7,
+            stride=1,
+            padding=3,
+            padding_mode="reflect",
+        )
 
-# A very simplified Discriminator model
+    def forward(self, x):
+        x = self.initial(x)
+        for layer in self.down_blocks:
+            x = layer(x)
+        x = self.res_blocks(x)
+        for layer in self.up_blocks:
+            x = layer(x)
+        return torch.tanh(self.last(x))
+
+
+class Block(nn.Module):
+    def __init__(self, in_channels, out_channels, stride):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(
+                in_channels,
+                out_channels,
+                4,
+                stride,
+                1,
+                bias=True,
+                padding_mode="reflect",
+            ),
+            nn.InstanceNorm2d(out_channels),
+            nn.LeakyReLU(0.2, inplace=True),
+        )
+
+    def forward(self, x):
+        return self.conv(x)
+
+
 class Discriminator(nn.Module):
-    def __init__(self):
-        super(Discriminator, self).__init__()
-        self.model = nn.Sequential(
-            ConvBlock(3, 64, 4, 2, 1),  # input is (nc) x 256 x 256
-            ConvBlock(64, 128, 4, 2, 1),  # state size: (ndf) x 128 x 128
-            ConvBlock(128, 256, 4, 2, 1),  # state size: (ndf*2) x 64 x 64
-            ConvBlock(256, 512, 4, 2, 1),  # state size: (ndf*4) x 32 x 32
-            nn.Conv2d(512, 1, 4, 1, 1),  # state size: (ndf*4) x 31 x 31
-            nn.Sigmoid()
+    def __init__(self, in_channels=3, features=[64, 128, 256, 512]):
+        super().__init__()
+        self.initial = nn.Sequential(
+            nn.Conv2d(
+                in_channels,
+                features[0],
+                kernel_size=4,
+                stride=2,
+                padding=1,
+                padding_mode="reflect",
+            ),
+            nn.LeakyReLU(0.2, inplace=True),
         )
 
-    def forward(self, input):
-        return self.model(input)
+        layers = []
+        in_channels = features[0]
+        for feature in features[1:]:
+            layers.append(
+                Block(in_channels, feature, stride=1 if feature == features[-1] else 2)
+            )
+            in_channels = feature
+        layers.append(
+            nn.Conv2d(
+                in_channels,
+                1,
+                kernel_size=4,
+                stride=1,
+                padding=1,
+                padding_mode="reflect",
+            )
+        )
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, x):
+        x = self.initial(x)
+        return torch.sigmoid(self.model(x))
