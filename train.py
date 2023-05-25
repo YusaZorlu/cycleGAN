@@ -1,77 +1,115 @@
-"""General-purpose training script for image-to-image translation.
+# train.py
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
+from torchvision.utils import save_image
+import itertools
 
-This script works for various models (with option '--model': e.g., pix2pix, cyclegan, colorization) and
-different datasets (with option '--dataset_mode': e.g., aligned, unaligned, single, colorization).
-You need to specify the dataset ('--dataroot'), experiment name ('--name'), and model ('--model').
+from model import Generator, Discriminator  # assuming you have these modules defined in model.py
 
-It first creates model, dataset, and visualizer given the option.
-It then does standard network training. During the training, it also visualize/save the images, print/save the loss plot, and save models.
-The script supports continue/resume training. Use '--continue_train' to resume your previous training.
+# Hyperparameters
+lr_D = 0.0001
+lr_G = 0.0003
+batch_size = 32
+image_size = 256
+num_epochs = 40
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-Example:
-    Train a CycleGAN model:
-        python train.py --dataroot ./datasets/maps --name maps_cyclegan --model cycle_gan
-    Train a pix2pix model:
-        python train.py --dataroot ./datasets/facades --name facades_pix2pix --model pix2pix --direction BtoA
+# Image preprocessing
+transform = transforms.Compose([
+    transforms.Resize(image_size),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+])
 
-See options/base_options.py and options/train_options.py for more training options.
-See training and test tips at: https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/docs/tips.md
-See frequently asked questions at: https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/master/docs/qa.md
-"""
-import time
-from options.train_options import TrainOptions
-from data import create_dataset
-from models import create_model
-from util.visualizer import Visualizer
+# Data loader for domain A and B
+data_loader_A = DataLoader(datasets.ImageFolder('thermal2rgb/trainA', transform),
+                         batch_size=batch_size,
+                         shuffle=True)
 
-if __name__ == '__main__':
-    opt = TrainOptions().parse()   # get training options
-    dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
-    dataset_size = len(dataset)    # get the number of images in the dataset.
-    print('The number of training images = %d' % dataset_size)
+data_loader_B = DataLoader(datasets.ImageFolder('thermal2rgb/trainB', transform),
+                         batch_size=batch_size,
+                         shuffle=True)
 
-    model = create_model(opt)      # create a model given opt.model and other options
-    model.setup(opt)               # regular setup: load and print networks; create schedulers
-    visualizer = Visualizer(opt)   # create a visualizer that display/save images and plots
-    total_iters = 0                # the total number of training iterations
+# Initialize CycleGAN generators and discriminators
+G_A2B = Generator().to(device)
+G_B2A = Generator().to(device)
+D_A = Discriminator().to(device)
+D_B = Discriminator().to(device)
 
-    for epoch in range(opt.epoch_count, opt.n_epochs + opt.n_epochs_decay + 1):    # outer loop for different epochs; we save the model by <epoch_count>, <epoch_count>+<save_latest_freq>
-        epoch_start_time = time.time()  # timer for entire epoch
-        iter_data_time = time.time()    # timer for data loading per iteration
-        epoch_iter = 0                  # the number of training iterations in current epoch, reset to 0 every epoch
-        visualizer.reset()              # reset the visualizer: make sure it saves the results to HTML at least once every epoch
-        model.update_learning_rate()    # update learning rates in the beginning of every epoch.
-        for i, data in enumerate(dataset):  # inner loop within one epoch
-            iter_start_time = time.time()  # timer for computation per iteration
-            if total_iters % opt.print_freq == 0:
-                t_data = iter_start_time - iter_data_time
+# Optimizers
+opt_G = torch.optim.Adam(list(G_A2B.parameters()) + list(G_B2A.parameters()), lr=lr_G)
+opt_D = torch.optim.Adam(list(D_A.parameters()) + list(D_B.parameters()), lr=lr_D)
 
-            total_iters += opt.batch_size
-            epoch_iter += opt.batch_size
-            model.set_input(data)         # unpack data from dataset and apply preprocessing
-            model.optimize_parameters()   # calculate loss functions, get gradients, update network weights
+criterion_GAN = torch.nn.MSELoss().to(device)  # for adversarial loss
+criterion_cycle = torch.nn.L1Loss().to(device)  # for cycle consistency loss
 
-            if total_iters % opt.display_freq == 0:   # display images on visdom and save images to a HTML file
-                save_result = total_iters % opt.update_html_freq == 0
-                model.compute_visuals()
-                visualizer.display_current_results(model.get_current_visuals(), epoch, save_result)
+# Training
+for epoch in range(num_epochs):
+    for i, ((real_images_A, _), (real_images_B, _)) in itertools.zip_longest(data_loader_A, data_loader_B):
+        if real_images_A is None or real_images_B is None:
+            continue  # Skip the rest of this iteration
 
-            if total_iters % opt.print_freq == 0:    # print training losses and save logging information to the disk
-                losses = model.get_current_losses()
-                t_comp = (time.time() - iter_start_time) / opt.batch_size
-                visualizer.print_current_losses(epoch, epoch_iter, losses, t_comp, t_data)
-                if opt.display_id > 0:
-                    visualizer.plot_current_losses(epoch, float(epoch_iter) / dataset_size, losses)
+        real_images_A = real_images_A.to(device)
+        real_images_B = real_images_B.to(device)
 
-            if total_iters % opt.save_latest_freq == 0:   # cache our latest model every <save_latest_freq> iterations
-                print('saving the latest model (epoch %d, total_iters %d)' % (epoch, total_iters))
-                save_suffix = 'iter_%d' % total_iters if opt.save_by_iter else 'latest'
-                model.save_networks(save_suffix)
+        # Forward pass
+        fake_images_B = G_A2B(real_images_A)
+        cycle_images_A = G_B2A(fake_images_B)
 
-            iter_data_time = time.time()
-        if epoch % opt.save_epoch_freq == 0:              # cache our model every <save_epoch_freq> epochs
-            print('saving the model at the end of epoch %d, iters %d' % (epoch, total_iters))
-            model.save_networks('latest')
-            model.save_networks(epoch)
+        fake_images_A = G_B2A(real_images_B)
+        cycle_images_B = G_A2B(fake_images_A)
 
-        print('End of epoch %d / %d \t Time Taken: %d sec' % (epoch, opt.n_epochs + opt.n_epochs_decay, time.time() - epoch_start_time))
+        # GAN loss
+        fake_outputs_B = D_B(fake_images_B)
+        loss_GAN_A2B = criterion_GAN(fake_outputs_B, torch.ones_like(fake_outputs_B))
+
+        fake_outputs_A = D_A(fake_images_A)
+        loss_GAN_B2A = criterion_GAN(fake_outputs_A, torch.ones_like(fake_outputs_A))
+
+        # Cycle loss
+        loss_cycle_A2B = criterion_cycle(cycle_images_A, real_images_A)
+        loss_cycle_B2A = criterion_cycle(cycle_images_B, real_images_B)
+
+        # Total generator loss
+        loss_G = loss_GAN_A2B + loss_cycle_A2B + loss_GAN_B2A + loss_cycle_B2A
+
+        # Backward pass and optimization for generators
+        opt_G.zero_grad()
+        loss_G.backward()
+        opt_G.step()
+
+        # Forward pass for discriminator
+        real_outputs_B = D_B(real_images_B)
+        loss_real_B = criterion_GAN(real_outputs_B, torch.ones_like(real_outputs_B))
+        fake_outputs_B = D_B(fake_images_B.detach())
+        loss_fake_B = criterion_GAN(fake_outputs_B, torch.zeros_like(fake_outputs_B))
+
+        real_outputs_A = D_A(real_images_A)
+        loss_real_A = criterion_GAN(real_outputs_A, torch.ones_like(real_outputs_A))
+        fake_outputs_A = D_A(fake_images_A.detach())
+        loss_fake_A = criterion_GAN(fake_outputs_A, torch.zeros_like(fake_outputs_A))
+
+        # Total discriminator loss
+        loss_D_A = (loss_real_A + loss_fake_A) / 2
+        loss_D_B = (loss_real_B + loss_fake_B) / 2
+        loss_D = loss_D_A + loss_D_B
+
+        # Backward pass and optimization for discriminators
+        opt_D.zero_grad()
+        loss_D.backward()
+        opt_D.step()
+
+    # Save some generated images and the model
+    if (epoch + 1) % 10 == 0:
+        save_image(fake_images_B, f'images/fake_images_A2B-{epoch + 1}.png', normalize=True)
+        save_image(fake_images_A, f'images/fake_images_B2A-{epoch + 1}.png', normalize=True)
+        torch.save(G_A2B.state_dict(), f'models/G_A2B-{epoch + 1}.ckpt')
+        torch.save(G_B2A.state_dict(), f'models/G_B2A-{epoch + 1}.ckpt')
+        torch.save(D_A.state_dict(), f'models/D_A-{epoch + 1}.ckpt')
+        torch.save(D_B.state_dict(), f'models/D_B-{epoch + 1}.ckpt')
+
+print('Training completed.')
+
