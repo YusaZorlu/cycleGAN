@@ -48,7 +48,7 @@ criterion_cycle = torch.nn.L1Loss().to(device)  # for cycle consistency loss
 
 # Training
 for epoch in range(num_epochs):
-    for i, ((real_images_A, _), (real_images_B, _)) in itertools.zip_longest(data_loader_A, data_loader_B):
+    for i, ((real_images_A, _), (real_images_B, _)) in enumerate(zip(data_loader_A, data_loader_B)):
         if real_images_A is None or real_images_B is None:
             continue  # Skip the rest of this iteration
 
@@ -101,6 +101,12 @@ for epoch in range(num_epochs):
         opt_D.zero_grad()
         loss_D.backward()
         opt_D.step()
+        
+        # Save loss values for this batch
+        loss_G_values.append(loss_G.item())
+        loss_D_values.append(loss_D.item())
+        loss_D_A_values.append(loss_D_A.item())
+        loss_D_B_values.append(loss_D_B.item())
 
     # Save some generated images and the model
     if (epoch + 1) % 10 == 0:
@@ -113,3 +119,21 @@ for epoch in range(num_epochs):
 
 print('Training completed.')
 
+plt.figure(figsize=(12, 6))
+plt.subplot(2, 2, 1)
+plt.plot(loss_G_values, label='Generator loss')
+plt.legend()
+
+plt.subplot(2, 2, 2)
+plt.plot(loss_D_values, label='Discriminator total loss')
+plt.legend()
+
+plt.subplot(2, 2, 3)
+plt.plot(loss_D_A_values, label='Discriminator A loss')
+plt.legend()
+
+plt.subplot(2, 2, 4)
+plt.plot(loss_D_B_values, label='Discriminator B loss')
+plt.legend()
+
+plt.show()
