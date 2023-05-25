@@ -13,7 +13,7 @@ lr_D = 0.0001
 lr_G = 0.0003
 batch_size = 32
 image_size = 256
-num_epochs = 40
+num_epochs = 10
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Image preprocessing
