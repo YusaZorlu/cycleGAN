@@ -151,5 +151,5 @@ plt.legend()
 plt.subplot(2, 2, 4)
 plt.plot(loss_D_B_values, label='Discriminator B loss')
 plt.legend()
-
+plt.savefig('loss_plot.png')
 plt.show()
