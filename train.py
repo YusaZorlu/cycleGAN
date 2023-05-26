@@ -12,7 +12,7 @@ from model import Generator, Discriminator  # assuming you have these modules de
 # Hyperparameters
 lr_D = 0.00001
 lr_G = 0.00003
-batch_size = 32
+batch_size = 8
 image_size = 256
 num_epochs = 10
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
