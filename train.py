@@ -11,7 +11,7 @@ from model import Generator, Discriminator  # assuming you have these modules de
 
 # Hyperparameters
 lr_D = 0.00001
-lr_G = 0.00003
+lr_G = 0.00005
 batch_size = 8
 image_size = 256
 num_epochs = 10
@@ -63,7 +63,7 @@ if not os.path.exists('models'):
 
 # Training
 for epoch in range(num_epochs):
-    print("on epoch " , epoch)
+    print("on epoch " , epoch, "of", num_epochs)
     for i, ((real_images_A, _), (real_images_B, _)) in enumerate(zip(data_loader_A, data_loader_B)):
         if real_images_A is None or real_images_B is None:
             continue  # Skip the rest of this iteration
