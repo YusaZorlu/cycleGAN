@@ -63,13 +63,14 @@ if not os.path.exists('models'):
 
 # Training
 for epoch in range(num_epochs):
+    print("on epoch " + epoch)
     for i, ((real_images_A, _), (real_images_B, _)) in enumerate(zip(data_loader_A, data_loader_B)):
         if real_images_A is None or real_images_B is None:
             continue  # Skip the rest of this iteration
 
         real_images_A = real_images_A.to(device)
         real_images_B = real_images_B.to(device)
-        print(epoch)
+        
 
         # Forward pass
         fake_images_B = G_A2B(real_images_A)
